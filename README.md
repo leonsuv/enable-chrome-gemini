@@ -3,14 +3,14 @@
 # ✨ enable-chrome-gemini
 
 **Enable native Gemini in Chrome (Glic) on macOS in one command.**  
-*Zero dependencies. No `Local State` JSON hacks. Fully reversible.*
+*Zero dependencies. Persistent launcher app included. Fully reversible.*
 
 [![macOS](https://img.shields.io/badge/macOS-000000?style=flat-square&logo=apple&logoColor=white)](https://www.apple.com/macos/)
 [![Google Chrome](https://img.shields.io/badge/Chrome-141%2B-4285F4?style=flat-square&logo=googlechrome&logoColor=white)](https://www.google.com/chrome/)
 [![Shell](https://img.shields.io/badge/Bash-4EAA25?style=flat-square&logo=gnubash&logoColor=white)](enable-chrome-gemini.sh)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue?style=flat-square)](LICENSE)
 
-[Quick Start](#-quick-start) • [Options](#-options) • [How It Works](#-how-it-works) • [Revert](#-reverting)
+[Quick Start](#-quick-start) • [Options](#-options) • [How It Works](#-how-it-works) • [Disable / Revert](#-disabling--reverting)
 
 </div>
 
@@ -20,7 +20,7 @@
 
 Gemini in Chrome (`Glic`) is gated by Chrome policies, UI language (`en-US`), and variations country — and manually editing Chrome's `Local State` JSON is fragile, gets overwritten, and often hits macOS TCC (`Operation not permitted`) errors.
 
-`enable-chrome-gemini` takes the clean route: it sets the documented `com.google.Chrome` macOS preferences, switches Chrome's UI language to `en-US`, cleanly quits Chrome, and relaunches it with the native Glic feature and variations flags.
+`enable-chrome-gemini` takes the clean route: it sets the documented `com.google.Chrome` macOS preferences, switches Chrome's UI language to `en-US`, installs a persistent **`~/Applications/Chrome Gemini.app`** launcher for reboots, and relaunches Chrome with the native Glic feature and variations flags.
 
 ---
 
@@ -47,10 +47,7 @@ Want to preview every command first without touching Chrome?
 ```
 
 > [!TIP]
-> **Make it a one-word command:** Add an alias to your `~/.zshrc` so you can relaunch Chrome with Gemini anytime after a full `Cmd + Q`:
-> ```bash
-> echo 'alias chrome-gemini="$HOME/dev/enable-chrome-gemini/enable-chrome-gemini.sh"' >> ~/.zshrc
-> ```
+> **Persist across reboots:** Running the script automatically creates **`~/Applications/Chrome Gemini.app`**. Open **Chrome Gemini** from Spotlight or drag it to your Dock / Login Items so Chrome always launches with the Gemini flags after a reboot.
 
 ---
 
@@ -58,9 +55,10 @@ Want to preview every command first without touching Chrome?
 
 | Flag | Description |
 | :--- | :--- |
-| *(none)* | Apply `com.google.Chrome` defaults, quit Chrome cleanly, and relaunch with Gemini enabled. |
-| `--dry-run` | Print every command that would run without modifying `defaults` or restarting Chrome. |
-| `--reset` | Delete all `com.google.Chrome` keys written by this script and relaunch Chrome normally. |
+| *(none)* | Apply `com.google.Chrome` defaults, install `~/Applications/Chrome Gemini.app`, quit Chrome cleanly, and relaunch with Gemini enabled. |
+| `--dry-run` | Print every command that would run without modifying `defaults`, creating the app, or restarting Chrome. |
+| `--disable` | Explicitly disable Gemini in Chrome (`GeminiSettings=1`, `GeminiActOnWebSettings=1`), remove `~/Applications/Chrome Gemini.app`, and relaunch Chrome normally. |
+| `--reset` | Delete all `com.google.Chrome` keys and `~/Applications/Chrome Gemini.app`, then relaunch Chrome normally. |
 | `-h`, `--help` | Show usage help and exit. |
 
 ---
@@ -69,8 +67,8 @@ Want to preview every command first without touching Chrome?
 
 1. **Enables Chrome AI policies** via macOS `defaults write com.google.Chrome`.
 2. **Sets Chrome's UI locale** to `en-US` (required for Gemini in Chrome).
-3. **Cleanly quits Chrome** via AppleScript (`osascript`) with a 15-second timeout so tabs/sessions close gracefully.
-4. **Relaunches Chrome** with Glic feature flags and US variations country enabled.
+3. **Installs `~/Applications/Chrome Gemini.app`** — a lightweight launcher bundle (using Chrome's icon, with `LSUIElement=true`) so you can open Chrome with the required flags anytime from Dock or Spotlight.
+4. **Cleanly quits & relaunches Chrome** via AppleScript (`osascript`) with Glic feature flags and US variations country enabled.
 
 <details>
 <summary><strong>View exact defaults &amp; launch flags</strong></summary>
@@ -104,14 +102,20 @@ open -a "/Applications/Google Chrome.app" --args \
 - **macOS** with **Google Chrome 141+** installed at `/Applications/Google Chrome.app` *(tested on Chrome 158)*.
 - A **personal Google Account (18+)** or a **Google Workspace** account with Gemini enabled.
 
-> [!NOTE]
-> The `defaults` preferences persist across restarts, while the `--enable-features` and `--variations-override-country` flags apply to the launched session. If you fully quit Chrome (`Cmd + Q`) and reopen it from Dock/Spotlight and Gemini disappears, just run `./enable-chrome-gemini.sh` again.
+> [!IMPORTANT]
+> **Regional availability:** This script unlocks the Gemini in Chrome **client UI** (toolbar button and side panel). However, the Gemini side panel itself connects to Google's servers, which enforce **server-side regional availability** based on your IP/account location. If you are outside a supported rollout region, the side panel will still display *"Gemini in Chrome isn't available"* until Google enables your region.
 
 ---
 
-## ↩️ Reverting
+## ↩️ Disabling & Reverting
 
-To undo all changes made by this script and relaunch Chrome normally:
+Explicitly disable Gemini in Chrome and remove `~/Applications/Chrome Gemini.app`:
+
+```bash
+./enable-chrome-gemini.sh --disable
+```
+
+Or remove all `com.google.Chrome` defaults added by this script and restore Chrome to stock:
 
 ```bash
 ./enable-chrome-gemini.sh --reset
