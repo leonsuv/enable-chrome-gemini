@@ -2,14 +2,16 @@
 # enable-chrome-gemini.sh
 #
 # Enables Gemini in Chrome (Glic) on macOS by configuring com.google.Chrome
-# defaults, installing a persistent ~/Applications/Chrome Gemini.app launcher,
-# and relaunching Chrome with the required feature and variations flags.
+# defaults, patching Chrome's Local State (when permitted), installing a
+# persistent ~/Applications/Chrome Gemini.app launcher, and relaunching Chrome.
 
 set -euo pipefail
 
 CHROME_DOMAIN="com.google.Chrome"
 CHROME_APP="/Applications/Google Chrome.app"
 CHROME_PROCESS_NAME="Google Chrome"
+CHROME_LOCAL_STATE="${HOME}/Library/Application Support/Google/Chrome/Local State"
+LOCAL_STATE_BACKUP="${CHROME_LOCAL_STATE}.enable-chrome-gemini.bak"
 QUIT_TIMEOUT_SECONDS=15
 
 LAUNCHER_APP="${HOME}/Applications/Chrome Gemini.app"
@@ -24,16 +26,14 @@ usage() {
   cat <<'EOF'
 Usage: enable-chrome-gemini.sh [OPTIONS]
 
-Enable Gemini in Chrome (Glic) on macOS by setting com.google.Chrome defaults,
-creating a persistent ~/Applications/Chrome Gemini.app launcher, and
-relaunching Google Chrome with Glic feature and US variations flags.
+Enable Gemini in Chrome (Glic) on macOS.
 
 Options:
-  --dry-run   Print the actions that would be performed without making changes
-  --disable   Explicitly disable Gemini in Chrome policies, remove the launcher
-              app, and relaunch Chrome normally
-  --reset     Remove all com.google.Chrome defaults and launcher app created by
-              this script, then relaunch Chrome normally
+  --dry-run   Print planned actions without modifying files, defaults, or Chrome
+  --disable   Disable Gemini in Chrome policies, revert Local State flags,
+              remove Chrome Gemini.app, and relaunch Chrome normally
+  --reset     Remove all defaults and launcher app added by this script,
+              restore Local State, and relaunch Chrome normally
   -h, --help  Show this help message and exit
 EOF
 }
@@ -59,6 +59,98 @@ delete_default_if_present() {
   fi
 }
 
+patch_local_state() {
+  local mode="$1" # enable | disable | reset
+  if [[ "${DRY_RUN}" == "true" ]]; then
+    printf '[dry-run] patch %q (mode=%s, if accessible)\n' "${CHROME_LOCAL_STATE}" "${mode}"
+    return 0
+  fi
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "Note: python3 not found; skipping Local State patch."
+    return 0
+  fi
+
+  if [[ ! -r "${CHROME_LOCAL_STATE}" || ! -w "${CHROME_LOCAL_STATE}" ]]; then
+    echo "Note: Cannot access ${CHROME_LOCAL_STATE} (macOS app data permission)."
+    echo "      Run this script from Terminal.app (and allow access) to persist across normal Chrome launches,"
+    echo "      or launch Chrome using ${LAUNCHER_APP}."
+    return 0
+  fi
+
+  if [[ "${mode}" == "enable" && ! -f "${LOCAL_STATE_BACKUP}" ]]; then
+    cp "${CHROME_LOCAL_STATE}" "${LOCAL_STATE_BACKUP}"
+  fi
+
+  python3 - "${CHROME_LOCAL_STATE}" "${LOCAL_STATE_BACKUP}" "${mode}" "${VARIATIONS_COUNTRY}" <<'PY'
+import json, os, sys
+
+path, backup_path, mode, country = sys.argv[1:5]
+glic_labs = {"glic@1", "glic-side-panel@1", "glic-unified-fre-screen@1"}
+
+with open(path, "r", encoding="utf-8") as f:
+    data = json.load(f)
+
+browser = data.setdefault("browser", {})
+labs = list(browser.get("enabled_labs_experiments", []))
+profiles = data.get("profile", {}).get("info_cache", {})
+
+if mode == "enable":
+    data["variations_country"] = country
+    vpcc = data.get("variations_permanent_consistency_country")
+    if isinstance(vpcc, list) and len(vpcc) >= 2:
+        data["variations_permanent_consistency_country"] = [vpcc[0], country]
+    else:
+        data["variations_permanent_consistency_country"] = ["", country]
+
+    for lab in sorted(glic_labs):
+        if lab not in labs:
+            labs.append(lab)
+    browser["enabled_labs_experiments"] = labs
+
+    for p in profiles.values():
+        if isinstance(p, dict):
+            p["is_glic_eligible"] = True
+
+elif mode in ("disable", "reset"):
+    browser["enabled_labs_experiments"] = [x for x in labs if x not in glic_labs]
+
+    if mode == "disable":
+        for p in profiles.values():
+            if isinstance(p, dict):
+                p["is_glic_eligible"] = False
+    elif mode == "reset":
+        if os.path.exists(backup_path):
+            with open(backup_path, "r", encoding="utf-8") as bf:
+                orig = json.load(bf)
+            for key in ("variations_country", "variations_permanent_consistency_country"):
+                if key in orig:
+                    data[key] = orig[key]
+                else:
+                    data.pop(key, None)
+            orig_profiles = orig.get("profile", {}).get("info_cache", {})
+            for name, p in profiles.items():
+                if isinstance(p, dict):
+                    if name in orig_profiles and "is_glic_eligible" in orig_profiles[name]:
+                        p["is_glic_eligible"] = orig_profiles[name]["is_glic_eligible"]
+                    else:
+                        p.pop("is_glic_eligible", None)
+        else:
+            data.pop("variations_country", None)
+            data.pop("variations_permanent_consistency_country", None)
+
+tmp_path = path + ".tmp"
+with open(tmp_path, "w", encoding="utf-8") as f:
+    json.dump(data, f, separators=(",", ":"))
+os.replace(tmp_path, path)
+PY
+
+  if [[ "${mode}" == "reset" && -f "${LOCAL_STATE_BACKUP}" ]]; then
+    rm -f "${LOCAL_STATE_BACKUP}"
+  fi
+  echo "Updated ${CHROME_LOCAL_STATE} (${mode})."
+}
+
 install_launcher_app() {
   local contents_dir="${LAUNCHER_APP}/Contents"
   local macos_dir="${contents_dir}/MacOS"
@@ -67,7 +159,7 @@ install_launcher_app() {
   local plist_path="${contents_dir}/Info.plist"
   local chrome_icon="${CHROME_APP}/Contents/Resources/app.icns"
 
-  echo "Installing persistent launcher at ${LAUNCHER_APP}..."
+  echo "Installing launcher at ${LAUNCHER_APP}..."
   if [[ "${DRY_RUN}" == "true" ]]; then
     printf '[dry-run] mkdir -p %q %q\n' "${macos_dir}" "${resources_dir}"
     printf '[dry-run] write %q (Info.plist)\n' "${plist_path}"
@@ -135,7 +227,7 @@ quit_chrome_cleanly() {
     return 0
   fi
 
-  echo "Quitting running Google Chrome cleanly..."
+  echo "Quitting Google Chrome..."
   run_cmd osascript -e 'tell application "Google Chrome" to quit'
 
   if [[ "${DRY_RUN}" == "true" ]]; then
@@ -190,22 +282,22 @@ if [[ ! -d "${CHROME_APP}" ]]; then
 fi
 
 if [[ "${DISABLE_MODE}" == "true" ]]; then
-  echo "Disabling Gemini in Chrome (${CHROME_DOMAIN}) and removing launcher app..."
-  # 1 = disable Gemini in Chrome and agentic web actions
+  echo "Disabling Gemini in Chrome..."
   run_cmd defaults write "${CHROME_DOMAIN}" GeminiSettings -int 1
   run_cmd defaults write "${CHROME_DOMAIN}" GeminiActOnWebSettings -int 1
 
-  remove_launcher_app
   quit_chrome_cleanly
+  patch_local_state disable
+  remove_launcher_app
 
-  echo "Relaunching Google Chrome normally..."
+  echo "Relaunching Google Chrome..."
   run_cmd open -a "${CHROME_APP}"
-  echo "Done. Gemini in Chrome disabled and launcher app removed."
+  echo "Done."
   exit 0
 fi
 
 if [[ "${RESET_MODE}" == "true" ]]; then
-  echo "Resetting ${CHROME_DOMAIN} Gemini/Glic defaults and launcher app..."
+  echo "Resetting Chrome Gemini configuration..."
   for key in \
     GeminiSettings \
     GeminiActOnWebSettings \
@@ -215,32 +307,30 @@ if [[ "${RESET_MODE}" == "true" ]]; then
     delete_default_if_present "${key}"
   done
 
-  remove_launcher_app
   quit_chrome_cleanly
+  patch_local_state reset
+  remove_launcher_app
 
-  echo "Relaunching Google Chrome normally..."
+  echo "Relaunching Google Chrome..."
   run_cmd open -a "${CHROME_APP}"
-  echo "Done. Chrome defaults and launcher app removed."
+  echo "Done."
   exit 0
 fi
 
-echo "Configuring ${CHROME_DOMAIN} defaults for Gemini in Chrome..."
-# 0 = allow Gemini in Chrome, agentic web actions, generative AI, and local model download
+echo "Configuring ${CHROME_DOMAIN} defaults..."
 run_cmd defaults write "${CHROME_DOMAIN}" GeminiSettings -int 0
 run_cmd defaults write "${CHROME_DOMAIN}" GeminiActOnWebSettings -int 0
 run_cmd defaults write "${CHROME_DOMAIN}" GenAiDefaultSettings -int 0
 run_cmd defaults write "${CHROME_DOMAIN}" GenAILocalFoundationalModelSettings -int 0
-
-# Gemini in Chrome currently requires Chrome UI language to be en-US
 run_cmd defaults write "${CHROME_DOMAIN}" AppleLanguages -array en-US
 
-install_launcher_app
 quit_chrome_cleanly
+patch_local_state enable
+install_launcher_app
 
 echo "Launching Google Chrome with Gemini (Glic) flags..."
 run_cmd open -a "${CHROME_APP}" --args \
   --enable-features="${CHROME_FEATURES}" \
   --variations-override-country="${VARIATIONS_COUNTRY}"
 
-echo "Done. Chrome relaunched and persistent launcher installed at ${LAUNCHER_APP}."
-echo "Tip: Launch \"Chrome Gemini\" from Spotlight or pin it to your Dock to keep flags active after reboots."
+echo "Done."
