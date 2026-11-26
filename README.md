@@ -1,81 +1,95 @@
-# enable-chrome-gemini
+<p align="center">
+  <img src="assets/banner.svg" alt="enable-chrome-gemini" width="100%">
+</p>
 
-Enable native Gemini in Chrome (Glic) on macOS persistently across `Cmd+Q` and reboots.
+<p align="center">
+  <a href="#install">Install</a> &nbsp;&middot;&nbsp;
+  <a href="#options">Options</a> &nbsp;&middot;&nbsp;
+  <a href="#how-it-works">How it works</a> &nbsp;&middot;&nbsp;
+  <a href="#uninstall">Uninstall</a> &nbsp;&middot;&nbsp;
+  <a href="LICENSE">MIT License</a>
+</p>
 
-[![macOS](https://img.shields.io/badge/macOS-14%2B-111111?style=flat-square)](https://www.apple.com/macos/)
-[![Chrome](https://img.shields.io/badge/Chrome-141%2B-111111?style=flat-square)](https://www.google.com/chrome/)
-[![License: MIT](https://img.shields.io/badge/license-MIT-111111?style=flat-square)](LICENSE)
+---
 
-## Usage
+## Install
 
-Run directly from Terminal:
+Run directly in Terminal:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/leonsuv/enable-chrome-gemini/main/enable-chrome-gemini.sh | bash
 ```
 
-Or clone and run locally:
+Or clone and inspect first:
 
 ```bash
 git clone https://github.com/leonsuv/enable-chrome-gemini.git
 cd enable-chrome-gemini
+./enable-chrome-gemini.sh --dry-run
 ./enable-chrome-gemini.sh
 ```
 
-### Options
+## Options
 
-| Flag | Description |
+| Flag | Behavior |
 | :--- | :--- |
-| *(none)* | Enable Chrome AI defaults, back up `/Applications/Google Chrome.app`, install the wrapper app, and relaunch Chrome. |
-| `--dry-run` | Print planned actions without making any changes. |
-| `--disable` | Set `GeminiSettings=1` and `GeminiActOnWebSettings=1`, restore the original `Google Chrome.app`, and relaunch Chrome. |
-| `--reset` | Delete all `com.google.Chrome` defaults added by this script, restore the original `Google Chrome.app`, and relaunch Chrome. |
-| `-h`, `--help` | Show help and exit. |
+| *(default)* | Writes Chrome AI `defaults`, backs up `Google Chrome.app`, installs the wrapper, and relaunches Chrome. |
+| `--dry-run` | Prints every action without modifying apps, `defaults`, or the running Chrome session. |
+| `--disable` | Sets `GeminiSettings=1` and `GeminiActOnWebSettings=1`, restores the original `Google Chrome.app`, and relaunches Chrome. |
+| `--reset` | Deletes all `com.google.Chrome` keys set by this script, restores the original `Google Chrome.app`, and relaunches Chrome. |
+| `-h`, `--help` | Displays usage information. |
 
-## How it persists across `Cmd+Q` and reboots
+## How it works
 
-1. Moves `/Applications/Google Chrome.app` to `/Applications/.Google Chrome Original.app` (hidden from Finder, Spotlight, and Launchpad).
-2. Installs a lightweight wrapper bundle at `/Applications/Google Chrome.app` (with Chrome's icon and `LSUIElement=true`) that launches `/Applications/.Google Chrome Original.app` with the Glic and US variations flags.
-3. Every normal launch of **Google Chrome** from the Dock, Spotlight, or Login Items automatically passes the flags.
+1. **Sets `com.google.Chrome` preferences** to allow Gemini, agentic web actions, on-device model downloads, and `en-US` UI language.
+2. **Backs up Chrome** by moving `/Applications/Google Chrome.app` to `/Applications/.Google Chrome Original.app` (hidden from Finder, Spotlight, and Launchpad).
+3. **Installs a transparent wrapper** at `/Applications/Google Chrome.app` (using Chrome's icon and `LSUIElement=true`) that forwards every Dock, Spotlight, or Login Item launch to the backed-up bundle with the Glic and US variations flags.
 
-Running `--disable` or `--reset` deletes the wrapper and moves `/Applications/.Google Chrome Original.app` right back to `/Applications/Google Chrome.app`.
-
-## What it changes
+Re-running the script is idempotent — a marker file inside the wrapper ensures the original backup is never overwritten.
 
 <details>
-<summary>macOS defaults, app wrapper, and launch flags</summary>
+<summary>Exact defaults and launch flags</summary>
 
-**`defaults write com.google.Chrome`**
+<br>
 
-- `GeminiSettings` = `0`
-- `GeminiActOnWebSettings` = `0`
-- `GenAiDefaultSettings` = `0`
-- `GenAILocalFoundationalModelSettings` = `0`
-- `AppleLanguages` = `("en-US")`
+**macOS `defaults` (`com.google.Chrome`)**
 
-**App wrapper**
+| Key | Value |
+| :--- | :--- |
+| `GeminiSettings` | `0` |
+| `GeminiActOnWebSettings` | `0` |
+| `GenAiDefaultSettings` | `0` |
+| `GenAILocalFoundationalModelSettings` | `0` |
+| `AppleLanguages` | `("en-US")` |
 
-- Original app moved to `/Applications/.Google Chrome Original.app`
-- Wrapper installed at `/Applications/Google Chrome.app`
-- Marker file at `/Applications/Google Chrome.app/Contents/.enable-chrome-gemini-wrapper` (prevents overwriting the backup on re-runs)
-
-**Launch flags**
+**Launch command inside wrapper**
 
 ```bash
 open -a "/Applications/.Google Chrome Original.app" --args \
   --enable-features="Glic,GlicSidePanel,GlicUnifiedFreScreen" \
-  --variations-override-country="us"
+  --variations-override-country="us" \
+  "$@"
 ```
 
 </details>
 
+## Uninstall
+
+Disable Gemini in Chrome and restore the original app bundle:
+
+```bash
+./enable-chrome-gemini.sh --disable
+```
+
+Or remove all preferences added by this script and restore Chrome to stock:
+
+```bash
+./enable-chrome-gemini.sh --reset
+```
+
 ## Notes
 
-- **Requirements:** macOS with Google Chrome 141+ at `/Applications/Google Chrome.app` (tested on Chrome 158) and a personal Google Account (18+) or permitted Workspace account.
-- **Chrome updates:** Before running a major Chrome update (or if Chrome's updater complains), run `./enable-chrome-gemini.sh --reset`, update Chrome, then re-run `./enable-chrome-gemini.sh`.
-- **Regional availability:** This script enables Chrome's client-side Gemini UI. The Gemini side panel itself connects to Google's servers, which enforce server-side regional availability based on IP/account location.
+- **Requirements:** macOS with Google Chrome 141+ installed at `/Applications/Google Chrome.app` (tested on Chrome 158) and a personal Google Account (18+) or permitted Workspace account.
+- **Updating Chrome:** Run `./enable-chrome-gemini.sh --reset` before applying a Chrome update, then re-run `./enable-chrome-gemini.sh` afterward.
+- **Regional availability:** This enables Chrome's client-side Gemini UI. The side panel connects to Google's servers, which enforce server-side regional availability based on IP and account location.
 - **Disclaimer:** Uses only documented macOS `defaults` and Chromium launch flags. Subject to Google's Terms of Service and regional rollout.
-
-## License
-
-[MIT](LICENSE)
