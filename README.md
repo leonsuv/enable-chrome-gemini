@@ -1,6 +1,6 @@
 # enable-chrome-gemini
 
-Enable native Gemini in Chrome (Glic) on macOS with a single script.
+Enable native Gemini in Chrome (Glic) on macOS persistently across `Cmd+Q` and reboots.
 
 [![macOS](https://img.shields.io/badge/macOS-14%2B-111111?style=flat-square)](https://www.apple.com/macos/)
 [![Chrome](https://img.shields.io/badge/Chrome-141%2B-111111?style=flat-square)](https://www.google.com/chrome/)
@@ -26,23 +26,24 @@ cd enable-chrome-gemini
 
 | Flag | Description |
 | :--- | :--- |
-| *(none)* | Enable Chrome AI defaults, patch `Local State`, install `~/Applications/Chrome Gemini.app`, and relaunch Chrome. |
+| *(none)* | Enable Chrome AI defaults, back up `/Applications/Google Chrome.app`, install the wrapper app, and relaunch Chrome. |
 | `--dry-run` | Print planned actions without making any changes. |
-| `--disable` | Set `GeminiSettings=1` and `GeminiActOnWebSettings=1`, clear Glic flags from `Local State`, remove `Chrome Gemini.app`, and relaunch Chrome. |
-| `--reset` | Delete all `com.google.Chrome` defaults added by this script, restore `Local State` from backup, remove `Chrome Gemini.app`, and relaunch Chrome. |
+| `--disable` | Set `GeminiSettings=1` and `GeminiActOnWebSettings=1`, restore the original `Google Chrome.app`, and relaunch Chrome. |
+| `--reset` | Delete all `com.google.Chrome` defaults added by this script, restore the original `Google Chrome.app`, and relaunch Chrome. |
 | `-h`, `--help` | Show help and exit. |
 
-## Persistence across `Cmd+Q` and reboots
+## How it persists across `Cmd+Q` and reboots
 
-Chrome's `defaults` persist automatically, while CLI launch flags only apply to the launched session. To keep Gemini active after quitting Chrome or rebooting, the script uses two mechanisms:
+1. Moves `/Applications/Google Chrome.app` to `/Applications/.Google Chrome Original.app` (hidden from Finder, Spotlight, and Launchpad).
+2. Installs a lightweight wrapper bundle at `/Applications/Google Chrome.app` (with Chrome's icon and `LSUIElement=true`) that launches `/Applications/.Google Chrome Original.app` with the Glic and US variations flags.
+3. Every normal launch of **Google Chrome** from the Dock, Spotlight, or Login Items automatically passes the flags.
 
-1. **`Local State` patch (automatic in Terminal.app):** When run from a terminal with permission to access Chrome's app data directory, the script backs up and updates `~/Library/Application Support/Google/Chrome/Local State` with `variations_country: "us"`, `is_glic_eligible: true`, and the Glic `chrome://flags` entries (`glic@1`, `glic-side-panel@1`, `glic-unified-fre-screen@1`). Regular Google Chrome launches will keep these settings after `Cmd+Q` and reboots.
-2. **`~/Applications/Chrome Gemini.app`:** Also installed as a fallback launcher (using Chrome's icon, `LSUIElement=true`) that opens Chrome with the launch flags directly. Useful if macOS blocks `Local State` access in a sandboxed shell.
+Running `--disable` or `--reset` deletes the wrapper and moves `/Applications/.Google Chrome Original.app` right back to `/Applications/Google Chrome.app`.
 
 ## What it changes
 
 <details>
-<summary>macOS defaults, Local State keys, and launch flags</summary>
+<summary>macOS defaults, app wrapper, and launch flags</summary>
 
 **`defaults write com.google.Chrome`**
 
@@ -52,17 +53,16 @@ Chrome's `defaults` persist automatically, while CLI launch flags only apply to 
 - `GenAILocalFoundationalModelSettings` = `0`
 - `AppleLanguages` = `("en-US")`
 
-**`~/Library/Application Support/Google/Chrome/Local State`**
+**App wrapper**
 
-- `variations_country` = `"us"`
-- `variations_permanent_consistency_country` = `["<version>", "us"]`
-- `browser.enabled_labs_experiments` += `glic@1`, `glic-side-panel@1`, `glic-unified-fre-screen@1`
-- `profile.info_cache.<profile>.is_glic_eligible` = `true`
+- Original app moved to `/Applications/.Google Chrome Original.app`
+- Wrapper installed at `/Applications/Google Chrome.app`
+- Marker file at `/Applications/Google Chrome.app/Contents/.enable-chrome-gemini-wrapper` (prevents overwriting the backup on re-runs)
 
 **Launch flags**
 
 ```bash
-open -a "/Applications/Google Chrome.app" --args \
+open -a "/Applications/.Google Chrome Original.app" --args \
   --enable-features="Glic,GlicSidePanel,GlicUnifiedFreScreen" \
   --variations-override-country="us"
 ```
@@ -72,8 +72,9 @@ open -a "/Applications/Google Chrome.app" --args \
 ## Notes
 
 - **Requirements:** macOS with Google Chrome 141+ at `/Applications/Google Chrome.app` (tested on Chrome 158) and a personal Google Account (18+) or permitted Workspace account.
+- **Chrome updates:** Before running a major Chrome update (or if Chrome's updater complains), run `./enable-chrome-gemini.sh --reset`, update Chrome, then re-run `./enable-chrome-gemini.sh`.
 - **Regional availability:** This script enables Chrome's client-side Gemini UI. The Gemini side panel itself connects to Google's servers, which enforce server-side regional availability based on IP/account location.
-- **Disclaimer:** Uses only documented macOS `defaults`, Chrome preferences, and Chromium launch flags. Subject to Google's Terms of Service and regional rollout.
+- **Disclaimer:** Uses only documented macOS `defaults` and Chromium launch flags. Subject to Google's Terms of Service and regional rollout.
 
 ## License
 
